@@ -8,24 +8,37 @@ import io
 import json
 import logging
 import requests
+import subprocess
 import sys
 import time
 import traceback
-import urllib3
+import urllib3, urllib
 
 LOG = logging.getLogger(__name__)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-def run_command(options, session):
-    LOG.info(f"Running command {options.command} on session {session['ID']} : {session['label']}")
+def run_command(options, session, idx):
+    LOG.info(f"Running command {options.command} on session {idx} {session['ID']} : {session['label']}")
     url = f"{options.host}/xapi/projects/{options.project_id}/commands/{options.command_id}/wrappers/{options.command_wrapper_id}/launch/"
     params = {"session" : session["ID"]}
     LOG.debug(f"Launching command: {url} {params}")
-    r = requests.post(url, verify=False, auth=(options.user, options.password), params=params)
-    if r.status_code != 200:
-        raise RuntimeError(f"Failed to run command: {r.text}")
+    tries = 0
+    while tries < 10:
+        tries += 1
+        r = requests.post(url, verify=False, auth=(options.user, options.password), params=params)
+        if r.status_code == 200:
+            break
+        elif r.status_code in (501, 502):
+            # We ignore proxy errors as usually this means the launch has succeeded?
+            LOG.warning(f"Proxy error - assuming success for session {session['ID']}: {r.text}")
+            break
+        # Try again as a lot of errors are temporary
+        time.sleep(10)
+
+    if r.status_code not in (200, 501, 502):
+        LOG.warning(f"Failed to run command on session {session['ID']}: {r.text} after 10 attempts")
     LOG.info("Started successfully")
-    
+
 def get_command(options):
     url = f"{options.host}/xapi/commands/available"
     params = {"project" : options.project_id, "xsiType" : "xnat:mrSessionData"}
@@ -52,16 +65,34 @@ def get_sessions(options):
         raise RuntimeError(f"Failed to download sessions for project {options.project_id}: {r.text}")
     return list(csv.DictReader(io.StringIO(r.text)))
 
+def login(options):
+    url = f"{options.host}/data/services/auth"
+    auth_params={"username" : options.user, "password" : options.password}
+    LOG.info(f"Logging in: {url}")
+    r = requests.put(url, verify=False, data=urllib.parse.urlencode(auth_params))
+    if r.status_code != 200:
+        raise RuntimeError(f"Failed to log in: {r.text}")
+    return r.text
+
 def get_project(options):
     """
     Get project ID from specified project name/ID
     """
+    options.jsession_id = login(options)
     url = f"{options.host}/data/projects/"
     params={"format" : "csv"}
+    cookies = {"JSESSIONID" : options.jsession_id}
     LOG.debug(f"Getting projects {url} {params}")
-    r = requests.get(url, verify=False, auth=(options.user, options.password), params=params)
+    tries = 0
+    while tries < 10:
+        tries += 1
+        #r = requests.get(url, verify=False, auth=(options.user, options.password), params=params)
+        r = requests.get(url, verify=False, cookies=cookies, params=params)
+        if r.status_code == 200:
+            break
+
     if r.status_code != 200:
-        raise RuntimeError(f"Failed to download projects: {r.text}")
+        raise RuntimeError(f"Failed to download projects after 10 tries: {r.status_code} {r.text}")
     projects = list(csv.DictReader(io.StringIO(r.text)))
     for project in projects:
         if project["ID"] == options.project or project["name"] == options.project:
@@ -78,6 +109,7 @@ class ArgumentParser(argparse.ArgumentParser):
         self.add_argument("--user", help="XNAT username")
         self.add_argument("--command", help="Name of command to run")
         self.add_argument("--sleep", help="Time to sleep between commands in seconds", type=int, default=60)
+        self.add_argument("--skip", help="Number of sessions to skip", type=int, default=0)
         self.add_argument("--yes", help="Run without prompting", action="store_true", default=False)
 
 def main():
@@ -110,9 +142,12 @@ def main():
                 LOG.info("Aborting run")
                 sys.exit(1)
 
-        for session in sessions:
-            run_command(options, session)
-            time.sleep(options.sleep)
+        for idx, session in enumerate(sessions):
+            if idx >= options.skip:
+                run_command(options, session, idx)
+                time.sleep(options.sleep)
+            else:
+                LOG.info(f"Skipping session {idx}: {session['label']}")
 
     except Exception as exc:
         LOG.error(exc)
