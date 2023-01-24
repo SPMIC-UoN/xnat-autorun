@@ -1,5 +1,5 @@
 """
-XNAT-AUTORUN: Run a command on all sessions in a project
+XNAT-BATCHRUN: Run an XNAT container command on all sessions in a project
 """
 import argparse
 import csv
@@ -8,11 +8,12 @@ import io
 import json
 import logging
 import requests
-import subprocess
 import sys
 import time
 import traceback
 import urllib3, urllib
+
+from ._version import __version__
 
 LOG = logging.getLogger(__name__)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -117,10 +118,8 @@ def main():
     Main script entry point
     """
     options = ArgumentParser().parse_args()
-    version = "0.0.1" # FIXME
-
     logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-    LOG.info(f"XNAT Autorun v{version}")
+    LOG.info(f"XNAT batch run v{__version__}")
 
     try:
         if not options.user:
