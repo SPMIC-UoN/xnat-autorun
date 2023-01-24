@@ -100,7 +100,7 @@ def get_project(options):
             return project["ID"]
     
     projects = [p["name"] for p in projects]
-    raise RuntimeError("Project not found: {options.project} - known project: {projects}")
+    raise RuntimeError(f"Project not found: {options.project} - known project: {projects}")
 
 class ArgumentParser(argparse.ArgumentParser):
     def __init__(self, **kwargs):
