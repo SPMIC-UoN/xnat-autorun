@@ -104,7 +104,7 @@ def get_project(options):
 
 class ArgumentParser(argparse.ArgumentParser):
     def __init__(self, **kwargs):
-        argparse.ArgumentParser.__init__(self, prog="imgqc", add_help=False, **kwargs)
+        argparse.ArgumentParser.__init__(self, prog="xnat-batchrun", add_help=False, **kwargs)
         self.add_argument("--host", help="XNAT host", required=True)
         self.add_argument("--project", help="XNAT project", required=True)
         self.add_argument("--user", help="XNAT username")
