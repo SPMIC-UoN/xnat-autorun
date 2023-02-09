@@ -11,12 +11,11 @@ import requests
 import sys
 import time
 import traceback
-import urllib3, urllib
 
 from ._version import __version__
+from .xnat_nott import xnat_login
 
 LOG = logging.getLogger(__name__)
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def run_command(options, session, idx):
     LOG.info(f"Running command {options.command} on session {idx} {session['ID']} : {session['label']}")
@@ -66,29 +65,19 @@ def get_sessions(options):
         raise RuntimeError(f"Failed to download sessions for project {options.project_id}: {r.text}")
     return list(csv.DictReader(io.StringIO(r.text)))
 
-def login(options):
-    url = f"{options.host}/data/services/auth"
-    auth_params={"username" : options.user, "password" : options.password}
-    LOG.info(f"Logging in: {url}")
-    r = requests.put(url, verify=False, data=urllib.parse.urlencode(auth_params))
-    if r.status_code != 200:
-        raise RuntimeError(f"Failed to log in: {r.text}")
-    return r.text
-
 def get_project(options):
     """
     Get project ID from specified project name/ID
     """
-    options.jsession_id = login(options)
+    xnat_login(options)
     url = f"{options.host}/data/projects/"
     params={"format" : "csv"}
-    cookies = {"JSESSIONID" : options.jsession_id}
     LOG.debug(f"Getting projects {url} {params}")
     tries = 0
     while tries < 10:
         tries += 1
         #r = requests.get(url, verify=False, auth=(options.user, options.password), params=params)
-        r = requests.get(url, verify=False, cookies=cookies, params=params)
+        r = requests.get(url, verify=False, cookies=options.cookies, auth=options.auth, params=params)
         if r.status_code == 200:
             break
 
