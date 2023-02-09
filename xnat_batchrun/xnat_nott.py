@@ -5,10 +5,11 @@ at Nottingham or used by Nottingham researchers
 import csv
 import getpass
 import io
-import os
-import sys
-import requests
+import json
 import logging
+import os
+import requests
+import sys
 import tempfile
 import urllib, urllib3
 
@@ -91,7 +92,7 @@ def get_project(options, project_identifier):
     projects = get_projects(options)
     for p in projects:
         if p["ID"].lower() == project_identifier or p["name"].lower() == project_identifier:
-            return project_identifier
+            return p
 
     project_names = [p["name"] for p in projects]
     raise RuntimeError(f"Project not found: {project_identifier} - known project: {project_names}")
@@ -146,6 +147,7 @@ def get_assessors(options, session, assessor_xsitype):
     :return: List of scan dictionaries
     """
     session_id = session["ID"]
+    LOG.debug(f"Getting assessors for session {session_id}")
     params={"format" : "csv", "xsiType" : assessor_xsitype, "columns" : "ID"}
     csvdata = xnat_get(options, f"data/experiments/{session_id}/assessors/", params=params)
     assessors = []
@@ -157,6 +159,31 @@ def get_assessors(options, session, assessor_xsitype):
         assessors.append(assessor)
 
     return assessors
+
+def get_command(options, project, command_name):
+    project_id = project["ID"]
+    LOG.info(f"Getting commands for project {project_id}")
+    params = {"project" : project_id, "xsiType" : "xnat:mrSessionData"}
+    jsondata = xnat_get(options, "/xapi/commands/available", params=params)
+    commands = json.loads(jsondata)
+    command = [c for c in commands if c["command-name"] == command_name]
+    if not command:
+        known_commands = [c["command-name"] for c in commands]
+        raise RuntimeError(f"Unable to find command {options.command} - known commands: {known_commands}")
+    if len(command) > 1:
+        LOG.warn("Multiple commands found - returning first")
+    return command[0]
+
+def run_command(options, project, session, command, idx=""):
+    command_name, command_id, wrapper_id = command["command-name"], command["command-id"], command["wrapper-id"]
+    project_id, session_id = project["ID"], session["ID"]
+    LOG.info(f"Running command {command_name} on session {idx} {session_id} : {session['label']}")
+
+    url = f"xapi/projects/{project_id}/commands/{command_id}/wrappers/{wrapper_id}/launch/"
+    params = {"session" : session_id}
+    xnat_get(options, url, params=params, method="POST")
+#        LOG.warning(f"Failed to run command on session {session_id}: {r.text} after 10 attempts")
+    LOG.info("Started successfully")
 
 def xnat_login(options):
     """
@@ -177,22 +204,26 @@ def xnat_login(options):
         options.auth = (options.user, options.password)
     LOG.info("DONE login")
 
-def xnat_get(options, url, params=None):
+def xnat_get(options, url, params=None, method="GET"):
     """
     Get text content from XNAT, e.g. CSV/XML data
     """
-    LOG.info(f"Executing GET on {options.host}")
+    LOG.debug(f"Executing GET on {options.host}")
     url = url.lstrip("/")
     url = f"{options.host}/{url}"
-    LOG.info(f" - URL: {url}")
+    LOG.debug(f" - URL: {url}")
     tries = 0
+    method_impl = getattr(requests, method.lower(), None)
+    if not method_impl:
+        raise RuntimeError(f"No such HTTP method: {method}")
+
     while tries < 10:
         tries += 1
-        r = requests.get(url, verify=False, cookies=options.cookies, auth=options.auth, params=params)
+        r = method_impl(url, verify=False, cookies=options.cookies, auth=options.auth, params=params)
         if r.status_code == 200:
             break
     if r.status_code != 200:
-        raise RuntimeError(f"Failed to execute GET after 10 tries: {r.status_code} {r.text}")
+        raise RuntimeError(f"Failed to execute {method} after 10 tries: {r.status_code} {r.text}")
     return r.text
 
 def xnat_download(options, url, params=None, local_fname=None):
